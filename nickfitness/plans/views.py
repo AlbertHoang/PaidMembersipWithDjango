@@ -2,7 +2,7 @@ from django.shortcuts import render, get_object_or_404, redirect
 from .forms import CustomSignupForm
 from django.urls import reverse_lazy
 from django.views import generic
-from .models import FitnessPlan
+from .models import FitnessPlan, Customer
 from django.contrib.auth import authenticate, login
 from django.contrib.auth.decorators import login_required
 import stripe
@@ -28,6 +28,33 @@ def checkout(request):
     coupons = {'halloween': 31, 'welcome': 10}
 
     if request.method == 'POST':
+        ## Process payments
+        stripe_customer = stripe.Customer.create(
+            email=request.user.email, source=request.POST['stripeToken'])
+        plan = 'plan_GMXQDbt0nCfkJ5'  # Add plan id for month
+        if request.POST['plan'] == 'yearly':
+            plan = 'plan_GMXRkAo9z5JJs3'
+        if request.POST['coupon'] in coupons:
+            percentage = coupons[request.POST['coupon'].lower()]
+            try:
+                coupon = stripe.Coupon.create(duration='once', id=request.POST['coupon'].lower(),
+                                              percent_off=percentage)
+            except:
+                pass
+            subscription = stripe.Subscription.create(customer=stripe_customer.id,
+                                                      items=[{'plan': plan}], coupon=request.POST['coupon'].lower())
+        else:
+            subscription = stripe.Subscription.create(customer=stripe_customer.id,
+                                                      items=[{'plan': plan}])
+
+        customer = Customer()
+        customer.user = request.user
+        customer.stripeid = stripe_customer.id
+        customer.membership = True
+        customer.cancel_at_period_end = False
+        customer.stripe_subscription_id = subscription.id
+        customer.save()
+
         return redirect('home')
     else:
         coupon = 'none'
