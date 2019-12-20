@@ -4,9 +4,25 @@ from django.urls import reverse_lazy
 from django.views import generic
 from .models import FitnessPlan, Customer
 from django.contrib.auth import authenticate, login
-from django.contrib.auth.decorators import login_required
+from django.contrib.auth.decorators import login_required, user_passes_test
 import stripe
+from django.http import HttpResponse
 stripe.api_key = 'sk_test_nuWJOw3lDoNZiEuwZONJlMwJ00eFdh2VCg'
+
+#Canceling a Subscription
+@user_passes_test(lambda u: u.is_superuser)
+def updateaccounts(request):
+    customers = Customer.objects.all()
+    for customer in customers:
+        subscription = stripe.Subscription.retrieve(customer.stripe_subscription_id)
+        if subscription.status != 'active':
+            customer.membership = False
+        else:
+            customer.membership = True
+        customer.cancel_at_period_end = subscription.cancel_at_period_end
+        customer.save()
+        return HttpResponse('completed')
+
 
 def home(request):
     plans = FitnessPlan.objects
@@ -90,7 +106,27 @@ def checkout(request):
         'coupon_dollar':coupon_dollar,'final_dollar':final_dollar})
 
 def settings(request):
-    return render(request, 'registration/settings.html')
+    membership = False
+    cancel_at_period_end = False
+    if request.method == 'POST':
+        subscription = stripe.Subscription.retrieve(request.user.customer.stripe_subscription_id)
+        subscription.cancel_at_period_end = True
+        request.user.customer.cancel_at_period_end = True
+        cancel_at_period_end = True
+        subscription.save()
+        request.user.customer.save()
+    
+    ## Setting for GET requests
+    else:   
+        try:
+            if request.user.customer.membership:
+                membership = True
+            if request.user.customer.cancel_at_period_end:
+                cancel_at_period_end = True
+        except Customer.DoesNotExist:
+            membership = False
+
+    return render(request, 'registration/settings.html', {'membership': membership, 'cancel_at_period_end': cancel_at_period_end})
 
 class SignUp(generic.CreateView):
     form_class = CustomSignupForm
